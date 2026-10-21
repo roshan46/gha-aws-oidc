@@ -1,0 +1,36 @@
+name: OIDC upload
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: oidc-development
+  cancel-in-progress: false
+jobs:
+  upload:
+    if: github.ref == 'refs/heads/main'
+    environment: development
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+      - name: Upload allowed prefix and prove outside-prefix denial
+        env:
+          BUCKET: ${{ vars.ARTIFACT_BUCKET }}
+        run: |
+          aws sts get-caller-identity
+          printf '%s\n' "$GITHUB_SHA" > release.txt
+          aws s3 cp release.txt "s3://$BUCKET/releases/$GITHUB_SHA.txt" --only-show-errors
+          if aws s3 cp release.txt "s3://$BUCKET/forbidden.txt" 2>denial.txt; then
+            echo 'Unexpected permission outside releases/' >&2; exit 1
+          fi
+          grep -q 'AccessDenied' denial.txt
